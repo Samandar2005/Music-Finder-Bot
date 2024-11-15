@@ -25,15 +25,22 @@ dp = Dispatcher()
 async def download_command(message: types.Message):
     youtube_url = message.text
     try:
+        # Pre-check the video availability
+        check_video_validity(youtube_url)
+
         await message.answer("Musiqa yuklanmoqda... ⏳")
         mp3_file = download_mp3(youtube_url)
 
         # Audio faylni InputFile sifatida yuborish
-        audio = InputFile(mp3_file)  # Faylni InputFile sifatida o'zgartirish
-        await message.answer_audio(audio, caption="Mana MP3 formatdagi musiqangiz!")
+        with open(mp3_file, "rb") as audio_file:
+            audio = InputFile(audio_file, filename=mp3_file)  # Faylni InputFile sifatida o'zgartirish
+            await message.answer_audio(audio, caption="Mana MP3 formatdagi musiqangiz!")
+
         os.remove(mp3_file)  # Faylni o'chirish
     except Exception as e:
         await message.answer(f"Yuklashda xatolik yuz berdi: {e}")
+
+
 
 # Qo'shiq qidirish funksiyasi
 def search_song(artist_or_lyrics):
@@ -51,11 +58,6 @@ def search_song(artist_or_lyrics):
 
 # MP3 yuklash funksiyasi
 def download_mp3(youtube_url, output_file="downloaded_music.mp3"):
-    # Ensure the directory exists
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
     ydl_opts = {
         "format": "bestaudio/best",
         "postprocessors": [{
@@ -64,8 +66,8 @@ def download_mp3(youtube_url, output_file="downloaded_music.mp3"):
             "preferredquality": "192",
         }],
         "outtmpl": output_file,
-        "ffmpeg_location": "D:\\ffmpeg\\bin\\ffmpeg.exe",  # Path to ffmpeg
-        "geo_bypass": True,  # To bypass geographical restrictions
+        "ffmpeg_location": "D:\\ffmpeg\\bin\\ffmpeg.exe",
+        "geo_bypass": True,
     }
 
     with YoutubeDL(ydl_opts) as ydl:
@@ -73,23 +75,26 @@ def download_mp3(youtube_url, output_file="downloaded_music.mp3"):
             ydl.download([youtube_url])
         except Exception as e:
             if 'Video unavailable' in str(e):
-                raise Exception("Video unavailable. It may be private, age-restricted, or region-blocked.")
+                raise Exception("Video unavailable. This may be due to privacy settings, age restrictions, or geographical limitations.")
             else:
                 raise Exception(f"Video download error: {e}")
+    return output_file
 
-    return output_file
-    return output_file
+
 def check_video_validity(url):
     try:
+        # Checking video availability with a head request to YouTube
         response = requests.head(url)
         if response.status_code == 200:
-            print("Video mavjud!")
+            print("Video is available!")
+            return True
         else:
-            print("Video topilmadi yoki cheklangan.")
-            raise Exception("Video topilmadi yoki cheklangan.")
+            print("Video is unavailable!")
+            raise Exception("Video is unavailable! It may be private, region-blocked, or removed.")
     except requests.exceptions.RequestException as e:
-        print(f"Xatolik: {e}")
-        raise Exception(f"Xatolik: {e}")
+        print(f"Error: {e}")
+        raise Exception(f"Error: {e}")
+
 
 
 
@@ -163,36 +168,6 @@ async def callback_download(call: types.CallbackQuery):
         os.remove(mp3_file)  # Faylni o'chirish
     except Exception as e:
         await call.message.answer(f"Yuklashda xatolik yuz berdi: {e}")
-
-
-# YouTube link orqali musiqa yuklash
-def download_mp3(youtube_url, output_file="downloaded_music.mp3"):
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "outtmpl": output_file,
-        "ffmpeg_location": "D:\\ffmpeg\\bin\\ffmpeg.exe",  # ffmpeg joylashuvini ko'rsatish
-    }
-    with YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([youtube_url])
-        except Exception as e:
-            raise Exception(f"Video yuklab olishda xatolik yuz berdi: {e}")
-    return output_file
-
-def check_video_validity(url):
-    try:
-        response = requests.head(url)
-        if response.status_code == 200:
-            print("Video mavjud!")
-        else:
-            print("Video topilmadi yoki cheklangan.")
-    except requests.exceptions.RequestException as e:
-        print(f"Xatolik: {e}")
 
 
 # Botni ishga tushirish
