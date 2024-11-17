@@ -1,179 +1,146 @@
-import asyncio
 import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler, filters
 import requests
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from yt_dlp import YoutubeDL
-import config  # config.py faylidan import qilish
-from aiogram import F, Router
-from aiogram.types import InputFile
+import yt_dlp
 
-router = Router()
+# API kalitlar
+LASTFM_API_KEY = "860f748cd287d0e9e9858f6ee3163347"
+GENIUS_API_KEY = "VCIqD0Sm6UPxM5Xkgrtg3ZqrNjilsXMpqLNUjN2FrOHA6ODl65r8NgKQOntg8399exOL2apvcIn96D5N-iVdyg"
 
-# Telegram Bot token va Last.fm API key
-BOT_TOKEN = config.TELEGRAM_BOT_TOKEN
-LASTFM_API_KEY = config.LASTFM_API_KEY
-LASTFM_API_URL = "http://ws.audioscrobbler.com/2.0/"
-
-# Botni yaratish
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+# Qo'shiqlar ro'yxatini saqlash uchun vaqtinchalik xotira
+song_results = {}
 
 
-@dp.message(lambda message: message.text.startswith("http"))
-async def download_command(message: types.Message):
-    youtube_url = message.text
-    try:
-        # Pre-check the video availability
-        check_video_validity(youtube_url)
-
-        await message.answer("Musiqa yuklanmoqda... ⏳")
-        mp3_file = download_mp3(youtube_url)
-
-        # Audio faylni InputFile sifatida yuborish
-        with open(mp3_file, "rb") as audio_file:
-            audio = InputFile(audio_file, filename=mp3_file)  # Faylni InputFile sifatida o'zgartirish
-            await message.answer_audio(audio, caption="Mana MP3 formatdagi musiqangiz!")
-
-        os.remove(mp3_file)  # Faylni o'chirish
-    except Exception as e:
-        await message.answer(f"Yuklashda xatolik yuz berdi: {e}")
+async def start(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text(
+        "Xush kelibsiz! Siz:\n"
+        "- Qo'shiq nomi yoki qo'shiqchining ismini kiriting.\n"
+        "- Mos qo'shiqlarni qidiring.\n"
+        "- Qo'shiqni tanlab, MP3 formatda yuklab oling.\n\n"
+        "Harakat qilib ko'ring!"
+    )
 
 
+async def search_song(update: Update, context: CallbackContext) -> None:
+    query = update.message.text.strip()
+    if not query:
+        await update.message.reply_text("Iltimos, qo'shiq yoki qo'shiqchi ismini kiriting.")
+        return
 
-# Qo'shiq qidirish funksiyasi
-def search_song(artist_or_lyrics):
-    params = {
-        "method": "track.search",
-        "track": artist_or_lyrics,
-        "api_key": LASTFM_API_KEY,
-        "format": "json",
-    }
-    response = requests.get(LASTFM_API_URL, params=params)
-    data = response.json()
-    tracks = data.get("results", {}).get("trackmatches", {}).get("track", [])
-    return tracks[:5]  # Birinchi 5 ta qo'shiqni qaytaradi
+    await update.message.reply_text(f"Qidirilmoqda: {query}")
 
-
-# MP3 yuklash funksiyasi
-def download_mp3(youtube_url, output_file="downloaded_music.mp3"):
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "outtmpl": output_file,
-        "ffmpeg_location": "D:\\ffmpeg\\bin\\ffmpeg.exe",
-        "geo_bypass": True,
-    }
-
-    with YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([youtube_url])
-        except Exception as e:
-            if 'Video unavailable' in str(e):
-                raise Exception("Video unavailable. This may be due to privacy settings, age restrictions, or geographical limitations.")
-            else:
-                raise Exception(f"Video download error: {e}")
-    return output_file
-
-
-def check_video_validity(url):
-    try:
-        # Checking video availability with a head request to YouTube
-        response = requests.head(url)
-        if response.status_code == 200:
-            print("Video is available!")
-            return True
-        else:
-            print("Video is unavailable!")
-            raise Exception("Video is unavailable! It may be private, region-blocked, or removed.")
-    except requests.exceptions.RequestException as e:
-        print(f"Error: {e}")
-        raise Exception(f"Error: {e}")
-
-
-
-
-
-# /start komandasi
-@dp.message(Command("start"))
-async def start_command(message: types.Message):
-    await message.answer(
-        "Salom! Qo'shiqni qidirish uchun matn yoki qo'shiqchi ismini yuboring.\nYouTube link yuborsangiz, musiqani MP3 formatda yuklab beraman!")
-
-
-@dp.message(lambda message: not message.text.startswith("http"))
-async def search_command(message: types.Message):
-    query = message.text
-    songs = search_song(query)
-    if not songs:
-        await message.answer("Qo'shiq topilmadi 😞. Boshqa matnni kiriting.")
-    else:
-        # Tugmalarni yaratish
-        buttons = [
-            [InlineKeyboardButton(
-                text=f"{song['name']} - {song['artist']}",
-                callback_data=f"song_{i}"  # Har bir qo'shiq uchun unikal identifikator
-            )]
-            for i, song in enumerate(songs)
+    # Qo'shiqlarni qidirish
+    results = search_by_lyrics_or_name(query)
+    if results:
+        # Inline tugmalar bilan qo'shiq ro'yxati
+        keyboard = [
+            [InlineKeyboardButton(f"{song['title']} - {song['artist']}", callback_data=str(i))]
+            for i, song in enumerate(results)
         ]
-        # InlineKeyboardMarkup yaratish
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Foydalanuvchiga xabar yuborish
-        await message.answer("Topilgan qo'shiqlar:\nTanlash uchun ustiga bosing:", reply_markup=keyboard)
+        # Qo'shiq ro'yxatini saqlash
+        global song_results
+        song_results = {str(i): song for i, song in enumerate(results)}
 
-        # Qo‘shiqlarni keyinchalik yuklab olish uchun saqlash
-        global song_data
-        song_data = {f"song_{i}": song for i, song in enumerate(songs)}
-
-# Inline tugma bosilganda yuklash
-@dp.callback_query(lambda call: call.data.startswith("song_"))
-async def handle_song_download(callback_query: types.CallbackQuery):
-    song_id = callback_query.data
-    print(f"Received song_id: {song_id}")  # Debug xabari
-    song = song_data.get(song_id)
-
-    if song:
-        print(f"Song found: {song}")  # Debug xabari
-        youtube_url = song.get("url")
-        if youtube_url:
-            try:
-                await callback_query.message.answer("Musiqa yuklanmoqda... ⏳")
-                mp3_file = download_mp3(youtube_url)
-                with open(mp3_file, "rb") as audio:
-                    await callback_query.message.answer_audio(audio, caption="Mana MP3 formatdagi musiqangiz!")
-                os.remove(mp3_file)
-            except Exception as e:
-                await callback_query.message.answer(f"Yuklashda xatolik yuz berdi: {e}")
-        else:
-            await callback_query.message.answer("YouTube URL topilmadi.")
+        await update.message.reply_text("Topilgan qo'shiqlar:", reply_markup=reply_markup)
     else:
-        await callback_query.message.answer("Xato: Qo'shiq topilmadi.")
+        await update.message.reply_text("Hech qanday qo'shiq topilmadi. Iltimos, boshqa kalit so'zlarni sinab ko'ring.")
 
 
-# Inline tugma bosilganda yuklash
-@dp.callback_query(lambda call: call.data.startswith("download:"))
-async def callback_download(call: types.CallbackQuery):
-    youtube_url = call.data.split("download:")[1]
+async def download_mp3(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    song_id = query.data
+    song = song_results.get(song_id)
+
+    if not song:
+        await query.message.reply_text("Qo'shiq ma'lumotlari topilmadi.")
+        return
+
+    await query.message.reply_text(f"{song['title']} - {song['artist']} MP3 yuklanmoqda...")
+
+    mp3_file = download_youtube_to_mp3(song["url"])
+    if mp3_file:
+        await query.message.reply_document(
+            open(mp3_file, "rb"), filename=os.path.basename(mp3_file)
+        )
+        os.remove(mp3_file)
+    else:
+        await query.message.reply_text(
+            "MP3 formatda yuklab olishda xatolik yuz berdi. Iltimos, boshqa qo'shiqni sinab ko'ring."
+        )
+
+def search_by_lyrics_or_name(query: str) -> list:
+    """
+    So'rov bo'yicha qo'shiqlarni qidiradi (Last.fm yoki Genius).
+    Mos keladigan qo'shiqlarning ro'yxatini qaytaradi.
+    """
+    results = []
+
+    # Last.fm API orqali qidirish
+    lastfm_url = (
+        f"http://ws.audioscrobbler.com/2.0/?method=track.search&track={query}"
+        f"&api_key={LASTFM_API_KEY}&format=json"
+    )
+    response = requests.get(lastfm_url).json()
+
+    if response['results']['trackmatches']['track']:
+        tracks = response['results']['trackmatches']['track']
+        results.extend(
+            {"title": track["name"], "artist": track["artist"], "url": track["url"]}
+            for track in tracks[:5]
+        )
+
+    return results
+
+
+def download_youtube_to_mp3(url: str) -> str:
+    """
+    YouTube video URL'ini MP3 formatga yuklab oladi.
+    """
+    output_file = "downloaded_song.mp3"
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': output_file,
+        'quiet': True,
+    }
+
     try:
-        await call.message.answer("Musiqa yuklanmoqda... ⏳")
-        mp3_file = download_mp3(youtube_url)
-        with open(mp3_file, "rb") as audio:
-            await call.message.answer_audio(audio, caption="Mana MP3 formatdagi musiqangiz!")
-        os.remove(mp3_file)  # Faylni o'chirish
-    except Exception as e:
-        await call.message.answer(f"Yuklashda xatolik yuz berdi: {e}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Videoni yuklab olish
+            info_dict = ydl.extract_info(url, download=False)
+            if 'is_live' in info_dict and info_dict['is_live']:
+                print("Ushbu video jonli efir, o'tkazib yuborilmoqda.")
+                return None
+            ydl.download([url])
+        # Fayl mavjudligini tekshirish
+        if os.path.exists(output_file):
+            return output_file
+        else:
+            print("Yuklab olish muvaffaqiyatsiz.")
+            return None
+    except yt_dlp.utils.DownloadError as e:
+        print(f"Yuklab olishda xatolik: {e}")
+        return None
 
 
-# Botni ishga tushirish
-async def main():
-    await dp.start_polling(bot)
+def main():
+    application = Application.builder().token("7573018273:AAH8_XtkleOY566-VJ8jsZipgLOTpGQBwvI").build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT, search_song))
+    application.add_handler(CallbackQueryHandler(download_mp3))
+
+    application.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
