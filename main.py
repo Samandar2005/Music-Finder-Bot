@@ -3,16 +3,24 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, CallbackQueryHandler, filters
 import requests
 import yt_dlp
+import re
+from youtubesearchpython import VideosSearch
+
 
 # API kalitlar
 LASTFM_API_KEY = "860f748cd287d0e9e9858f6ee3163347"
-GENIUS_API_KEY = "VCIqD0Sm6UPxM5Xkgrtg3ZqrNjilsXMpqLNUjN2FrOHA6ODl65r8NgKQOntg8399exOL2apvcIn96D5N-iVdyg"
 
 # Qo'shiqlar ro'yxatini saqlash uchun vaqtinchalik xotira
 song_results = {}
 
 
+def sanitize_filename(name: str) -> str:
+    """Fayl nomidagi noqonuniy belgilarni tozalash."""
+    return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
+
 async def start(update: Update, context: CallbackContext) -> None:
+    """Botning boshlang'ich xabari."""
     await update.message.reply_text(
         "Xush kelibsiz! Siz:\n"
         "- Qo'shiq nomi yoki qo'shiqchining ismini kiriting.\n"
@@ -23,6 +31,7 @@ async def start(update: Update, context: CallbackContext) -> None:
 
 
 async def search_song(update: Update, context: CallbackContext) -> None:
+    """Foydalanuvchining so'roviga asoslangan qo'shiqni qidirish."""
     query = update.message.text.strip()
     if not query:
         await update.message.reply_text("Iltimos, qo'shiq yoki qo'shiqchi ismini kiriting.")
@@ -64,18 +73,20 @@ async def download_mp3(update: Update, context: CallbackContext) -> None:
 
     mp3_file = download_youtube_to_mp3(song["url"])
     if mp3_file:
+        # Foydalanuvchiga faylni haqiqiy nom bilan yuborish
         await query.message.reply_document(
             open(mp3_file, "rb"), filename=os.path.basename(mp3_file)
         )
-        os.remove(mp3_file)
+        os.remove(mp3_file)  # Faylni o‘chirib tashlash
     else:
         await query.message.reply_text(
             "MP3 formatda yuklab olishda xatolik yuz berdi. Iltimos, boshqa qo'shiqni sinab ko'ring."
         )
 
+
 def search_by_lyrics_or_name(query: str) -> list:
     """
-    So'rov bo'yicha qo'shiqlarni qidiradi (Last.fm yoki Genius).
+    So'rov bo'yicha qo'shiqlarni qidiradi (Last.fm va YouTube orqali).
     Mos keladigan qo'shiqlarning ro'yxatini qaytaradi.
     """
     results = []
@@ -87,21 +98,46 @@ def search_by_lyrics_or_name(query: str) -> list:
     )
     response = requests.get(lastfm_url).json()
 
-    if response['results']['trackmatches']['track']:
-        tracks = response['results']['trackmatches']['track']
+    if 'results' in response and 'trackmatches' in response['results']:
+        tracks = response['results']['trackmatches'].get('track', [])
+        if not isinstance(tracks, list):
+            tracks = [tracks]
         results.extend(
-            {"title": track["name"], "artist": track["artist"], "url": track["url"]}
+            {"title": track["name"], "artist": track["artist"], "url": get_youtube_url(f"{track['name']} {track['artist']}")}
             for track in tracks[:5]
         )
+
+    # Agar Last.fm natija bermasa, YouTube orqali qidiring
+    if not results:
+        youtube_url = get_youtube_url(query)
+        if youtube_url:
+            results.append({"title": query, "artist": "YouTube", "url": youtube_url})
 
     return results
 
 
+def get_youtube_url(query: str) -> str:
+    """YouTube'dan so'rov bo'yicha birinchi video URL'ini qaytaradi."""
+    try:
+        videos_search = VideosSearch(query, limit=1)
+        result = videos_search.result()
+        if result["result"]:
+            return result["result"][0]["link"]
+    except Exception as e:
+        print(f"YouTube URL qidirishda xatolik: {e}")
+    return None
+
+
+
+
 def download_youtube_to_mp3(url: str) -> str:
     """
-    YouTube video URL'ini MP3 formatga yuklab oladi.
+    YouTube URL ni yuklab olib, qo'shiqning haqiqiy nomi bilan saqlaydi.
     """
-    output_file = "downloaded_song.mp3"
+    if not url:
+        print("Ogohlantirish: URL qiymati yo'q.")
+        return None  # Agar URL bo'sh bo'lsa, hech nima qaytarmaslik
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -109,37 +145,41 @@ def download_youtube_to_mp3(url: str) -> str:
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'outtmpl': output_file,
         'quiet': True,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Videoni yuklab olish
+            # Metadata olish
             info_dict = ydl.extract_info(url, download=False)
-            if 'is_live' in info_dict and info_dict['is_live']:
-                print("Ushbu video jonli efir, o'tkazib yuborilmoqda.")
-                return None
-            ydl.download([url])
-        # Fayl mavjudligini tekshirish
-        if os.path.exists(output_file):
-            return output_file
-        else:
-            print("Yuklab olish muvaffaqiyatsiz.")
-            return None
+            track_title = info_dict.get("title", "downloaded_song")
+            track_title = sanitize_filename(track_title)
+            output_file = f"{track_title}.mp3"  # Faqat bitta ".mp3" qo'shiladi
+
+            # Faylni yuklab olish
+            ydl_opts['outtmpl'] = track_title  # ".mp3" ni avtomatik qo'shadi
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl_download:
+                ydl_download.download([url])
+
+            # Fayl mavjudligini tekshirish
+            if os.path.exists(output_file):
+                return output_file
     except yt_dlp.utils.DownloadError as e:
         print(f"Yuklab olishda xatolik: {e}")
-        return None
+    return None
+
 
 
 def main():
+    """Botni ishga tushirish."""
     application = Application.builder().token("7573018273:AAH8_XtkleOY566-VJ8jsZipgLOTpGQBwvI").build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT, search_song))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_song))
     application.add_handler(CallbackQueryHandler(download_mp3))
 
     application.run_polling()
+
 
 
 if __name__ == "__main__":
