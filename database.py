@@ -6,6 +6,7 @@ from datetime import datetime
 # Postgres ulanish sozlamalari
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://samandar:1234@localhost:5432/telegram_bot")
 
+
 def get_db_connection():
     """Bazaga ulanish."""
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)

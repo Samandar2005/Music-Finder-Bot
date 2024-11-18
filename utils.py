@@ -3,8 +3,12 @@ import re
 import requests
 from youtubesearchpython import VideosSearch
 import yt_dlp
+from dotenv import load_dotenv
 
-LASTFM_API_KEY = "860f748cd287d0e9e9858f6ee3163347"
+load_dotenv()
+
+LASTFM_API_KEY = os.getenv("LASTFM_API_KEY")
+
 
 def sanitize_filename(name: str) -> str:
     """Fayl nomidagi noqonuniy belgilarni tozalash."""
@@ -12,7 +16,10 @@ def sanitize_filename(name: str) -> str:
 
 
 def search_by_lyrics_or_name(query: str) -> list:
-    """So'rov bo'yicha qo'shiqlarni qidiradi."""
+    """
+    So'rov bo'yicha qo'shiqlarni qidiradi (Last.fm va YouTube orqali).
+    Mos keladigan qo'shiqlarning ro'yxatini qaytaradi.
+    """
     results = []
 
     # Last.fm API orqali qidirish
@@ -32,7 +39,7 @@ def search_by_lyrics_or_name(query: str) -> list:
             for track in tracks[:5]
         )
 
-    # Agar Last.fm natija bermasa, YouTube orqali qidirish
+    # Agar Last.fm natija bermasa, YouTube orqali qidiring
     if not results:
         youtube_url = get_youtube_url(query)
         if youtube_url:
@@ -54,20 +61,31 @@ def get_youtube_url(query: str) -> str:
 
 
 def download_youtube_to_mp3(url: str) -> str:
+    """
+    YouTube URL ni yuklab olib, qo'shiqning haqiqiy nomi bilan saqlaydi.
+    """
+    if not url:
+        print("Ogohlantirish: URL qiymati yo'q.")
+        return None
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-        'outtmpl': '%(title)s.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
         'quiet': True,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=False)
-            track_title = sanitize_filename(info_dict.get("title", "downloaded_song"))
+            track_title = info_dict.get("title", "downloaded_song")
+            track_title = sanitize_filename(track_title)
             output_file = f"{track_title}.mp3"
 
-            ydl_opts['outtmpl'] = output_file
+            ydl_opts['outtmpl'] = track_title
             with yt_dlp.YoutubeDL(ydl_opts) as ydl_download:
                 ydl_download.download([url])
 
