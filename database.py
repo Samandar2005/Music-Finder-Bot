@@ -1,10 +1,12 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
-from datetime import datetime
+from dotenv import load_dotenv
 
+
+load_dotenv()
 # Postgres ulanish sozlamalari
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://samandar:1234@localhost:5432/telegram_bot")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def get_db_connection():
