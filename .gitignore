@@ -1,2 +1,5 @@
-/venv/
+# .env faylini e'tibordan chetda qoldirish
 .env
+
+# virtual environment papkasini e'tibordan chetda qoldirish
+/venv/

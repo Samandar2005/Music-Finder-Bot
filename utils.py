@@ -68,6 +68,9 @@ def download_youtube_to_mp3(url: str) -> str:
         print("Ogohlantirish: URL qiymati yo'q.")
         return None
 
+    # Cookie fayl yo'li
+    cookies_file = "cookies.txt"  # Bu yerda cookie fayl yo'lini ko'rsating
+
     ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
@@ -76,6 +79,7 @@ def download_youtube_to_mp3(url: str) -> str:
             'preferredquality': '192',
         }],
         'quiet': True,
+        'cookiefile': cookies_file,  # Cookie faylini qo'shing
     }
 
     try:
