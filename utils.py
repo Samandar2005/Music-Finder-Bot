@@ -62,39 +62,38 @@ def get_youtube_url(query: str) -> str:
 
 def download_youtube_to_mp3(url: str) -> str:
     """
-    YouTube URL ni yuklab olib, qo'shiqning haqiqiy nomi bilan saqlaydi.
+    YouTube URL ni yuklab olib, qo'shiqni MP3 formatida saqlaydi.
     """
     if not url:
         print("Ogohlantirish: URL qiymati yo'q.")
         return None
 
-    # Cookie fayl yo'li
-    cookies_file = "cookies.txt"  # Bu yerda cookie fayl yo'lini ko'rsating
-
-    ydl_opts = {
+    # Yuklab olish sozlamalari
+    options = {
         'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'cookiefile': cookies_file,  # Cookie faylini qo'shing
+        'postprocessors': [
+            {
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            },
+        ],
+        'outtmpl': '%(title)s.%(ext)s',  # Fayl nomi qo'shiq nomi bilan belgilanadi
+        'noplaylist': True,  # Faqat bitta videoni yuklab olish
+        'quiet': True,  # Loglarni minimallashtirish
     }
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
-            track_title = info_dict.get("title", "downloaded_song")
-            track_title = sanitize_filename(track_title)
-            output_file = f"{track_title}.mp3"
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            file_name = ydl.prepare_filename(info_dict).replace(".webm", ".mp3").replace(".m4a", ".mp3")
 
-            ydl_opts['outtmpl'] = track_title
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl_download:
-                ydl_download.download([url])
+            # Fayl nomini sanitizatsiya qilish
+            sanitized_name = sanitize_filename(file_name)
+            if sanitized_name != file_name:
+                os.rename(file_name, sanitized_name)
 
-            if os.path.exists(output_file):
-                return output_file
+            return sanitized_name
     except yt_dlp.utils.DownloadError as e:
         print(f"Yuklab olishda xatolik: {e}")
     return None
